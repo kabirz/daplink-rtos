@@ -15,12 +15,14 @@ LOG_MODULE_REGISTER(daplink, LOG_LEVEL_INF);
 static struct usbd_context *sample_usbd;
 
 #define HID_LED_NODE DT_ALIAS(hid_led)
+#if DT_NODE_EXISTS(DT_ALIAS(cdc_led))
 #define CDC_LED_NODE DT_ALIAS(cdc_led)
+#endif
 
 #if DT_NODE_EXISTS(HID_LED_NODE)
 static const struct gpio_dt_spec hid_led = GPIO_DT_SPEC_GET(HID_LED_NODE, gpios);
 #endif
-#if DT_NODE_EXISTS(CDC_LED_NODE)
+#if defined(CDC_LED_NODE) && DT_NODE_EXISTS(CDC_LED_NODE)
 static const struct gpio_dt_spec cdc_led = GPIO_DT_SPEC_GET(CDC_LED_NODE, gpios);
 #endif
 
@@ -43,11 +45,13 @@ void main_blink_hid_led(void)
     activity_tick = k_uptime_get();
 }
 
+#if defined(CDC_LED_NODE) && DT_NODE_EXISTS(CDC_LED_NODE)
 void main_blink_cdc_led(void)
 {
     cdc_activity = true;
     activity_tick = k_uptime_get();
 }
+#endif
 
 static void led_write(const struct gpio_dt_spec *led, bool on)
 {
@@ -60,11 +64,13 @@ static void handle_leds(void)
     if (hid_activity && (now - activity_tick) > 250) {
         hid_activity = false;
     }
+#if defined(CDC_LED_NODE) && DT_NODE_EXISTS(CDC_LED_NODE)
     if (cdc_activity && (now - activity_tick) > 250) {
         cdc_activity = false;
     }
-    led_write(&hid_led, hid_activity);
     led_write(&cdc_led, cdc_activity);
+#endif
+    led_write(&hid_led, hid_activity);
 }
 
 extern void flash_prog_periodic(void);

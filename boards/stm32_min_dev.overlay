@@ -1,0 +1,48 @@
+&zephyr_udc0 {
+	hid_dev0: hid_dev0 {
+		compatible = "zephyr,hid-device";
+		in-report-size = <64>;
+		in-polling-period-us = <1000>;
+		out-report-size = <64>;
+		out-polling-period-us = <1000>;
+	};
+
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};
+
+/ {
+	aliases {
+		swclk = &swclk_pin;
+		swdio = &swdio_pin;
+		nrst = &nrst_pin;
+		hid-led = &hid_led;
+	};
+
+	swj_pins: swj_pins {
+		swclk_pin: swclk_pin {
+			gpios = <&gpiob 0 GPIO_ACTIVE_HIGH>;
+		};
+		swdio_pin: swdio_pin {
+			gpios = <&gpiob 1 GPIO_ACTIVE_HIGH>;
+		};
+		nrst_pin: nrst_pin {
+			gpios = <&gpiob 2 GPIO_ACTIVE_HIGH>;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		hid_led: hid_led {
+			gpios = <&gpiob 12 GPIO_ACTIVE_HIGH>;
+		};
+	};
+
+	ram_disk0: ram_disk0 {
+		compatible = "zephyr,ram-disk";
+		disk-name = "DAPLINK";
+		sector-size = <512>;
+		sector-count = <8>;
+	};
+};
