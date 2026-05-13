@@ -39,10 +39,4 @@
 		};
 	};
 
-	ram_disk0: ram_disk0 {
-		compatible = "zephyr,ram-disk";
-		disk-name = "DAPLINK";
-		sector-size = <512>;
-		sector-count = <8>;
-	};
 };

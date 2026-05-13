@@ -73,7 +73,7 @@ static void handle_leds(void)
     led_write(&hid_led, hid_activity);
 }
 
-extern void flash_prog_periodic(void);
+__attribute__((weak)) void flash_prog_periodic(void) {}
 
 static void timer_cb(struct k_timer *timer)
 {
