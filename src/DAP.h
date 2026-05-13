@@ -312,7 +312,9 @@ uint8_t  DAP_UART_Transport(uint8_t transport);
 uint8_t  DAP_UART_Configure(uint32_t baudrate);
 uint8_t  DAP_UART_Control(uint8_t control);
 uint8_t  DAP_UART_Status(void);
-
+uint16_t DAP_UART_Read(uint8_t *buf);
+uint16_t DAP_UART_Write(const uint8_t *buf);
+uint8_t  DAP_UART_GetTransport(void);
 
 /* DAP Vendor Functions */
 uint32_t DAP_ProcessVendorCommand(const uint8_t *request, uint8_t *response);

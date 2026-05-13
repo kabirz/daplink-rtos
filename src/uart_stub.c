@@ -1,6 +1,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
+#include "DAP_config.h"
 #include "DAP.h"
 
 /* Second peer of uart-bridge is the target UART:
@@ -16,6 +17,7 @@ static const struct device *const target_uart = NULL;
 #endif
 
 static bool uart_active;
+static uint8_t uart_transport;
 static uint32_t uart_baud = 115200;
 
 void DAP_UART_Init(void)
@@ -33,7 +35,9 @@ uint8_t DAP_UART_Connect(void)
 
 uint8_t DAP_UART_Disconnect(void) { uart_active = false; return 1; }
 
-uint8_t DAP_UART_Transport(uint8_t transport) { (void)transport; return 1; }
+uint8_t DAP_UART_Transport(uint8_t transport) { uart_transport = transport; return 1; }
+
+uint8_t DAP_UART_GetTransport(void) { return uart_transport; }
 
 uint8_t DAP_UART_Configure(uint32_t baudrate)
 {
@@ -63,6 +67,26 @@ uint8_t DAP_UART_Status(void)
     }
     s |= 4;
     return s;
+}
+
+uint16_t DAP_UART_Read(uint8_t *buf)
+{
+    if (!uart_active || !target_uart) return 0;
+    uint16_t cnt = 0;
+    while (cnt < 64) {
+        if (uart_poll_in(target_uart, &buf[cnt]) != 0) break;
+        cnt++;
+    }
+    return cnt;
+}
+
+uint16_t DAP_UART_Write(const uint8_t *buf)
+{
+    if (!uart_active || !target_uart) return 0;
+    for (uint16_t i = 0; i < DAP_PACKET_SIZE; i++) {
+        uart_poll_out(target_uart, buf[i]);
+    }
+    return DAP_PACKET_SIZE;
 }
 
 

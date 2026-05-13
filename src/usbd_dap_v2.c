@@ -150,15 +150,20 @@ static int dap_v2_request(struct usbd_class_data *const c_data,
 			size_t len = MIN(buf->len, sizeof(dap_v2_buf_out));
 			memcpy(dap_v2_buf_out, buf->data, len);
 
-			uint32_t resp_len = DAP_ProcessCommand(dap_v2_buf_out,
-							       dap_v2_buf_in);
-			uint16_t rlen = (uint16_t)(resp_len & 0xFFFF);
-			if (rlen > 0 && rlen <= sizeof(dap_v2_buf_in)) {
-				struct net_buf *nbuf = usbd_ep_buf_alloc(c_data,
-					in_ep, rlen);
-				if (nbuf) {
-					net_buf_add_mem(nbuf, dap_v2_buf_in, rlen);
-					usbd_ep_enqueue(c_data, nbuf);
+			if (DAP_UART_GetTransport() == 2) {
+				DAP_UART_Write(dap_v2_buf_out);
+			} else {
+				uint32_t resp_len = DAP_ProcessCommand(
+					dap_v2_buf_out, dap_v2_buf_in);
+				uint16_t rlen = (uint16_t)(resp_len & 0xFFFF);
+				if (rlen > 0 && rlen <= sizeof(dap_v2_buf_in)) {
+					struct net_buf *nbuf = usbd_ep_buf_alloc(
+						c_data, in_ep, rlen);
+					if (nbuf) {
+						net_buf_add_mem(nbuf, dap_v2_buf_in,
+								rlen);
+						usbd_ep_enqueue(c_data, nbuf);
+					}
 				}
 			}
 		}
@@ -169,6 +174,21 @@ static int dap_v2_request(struct usbd_class_data *const c_data,
 
 	if (ep == in_ep) {
 		atomic_clear_bit(&data->state, DAP_V2_IN_BUSY);
+		if (err == 0 && DAP_UART_GetTransport() == 2) {
+			uint8_t uart_buf[64];
+			uint16_t rlen = DAP_UART_Read(uart_buf);
+			if (rlen > 0) {
+				struct net_buf *nbuf = usbd_ep_buf_alloc(c_data,
+					in_ep, rlen);
+				if (nbuf) {
+					net_buf_add_mem(nbuf, uart_buf, rlen);
+					usbd_ep_enqueue(c_data, nbuf);
+					net_buf_unref(buf);
+					dap_v2_submit_out(c_data);
+					return 0;
+				}
+			}
+		}
 		net_buf_unref(buf);
 		dap_v2_submit_in(c_data);
 		return 0;
