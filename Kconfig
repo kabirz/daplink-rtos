@@ -39,3 +39,69 @@ config DAPLINK_UART_RX_BUF_SIZE
 config DAPLINK_UART_TX_BUF_SIZE
 	int "UART TX buffer size"
 	default 1024
+
+menuconfig DAPLINK_FLASH_ALGO
+	bool "Flash algorithm targets"
+	default y if !SOC_STM32F103X8
+	help
+	  Select target flash algorithms to include.
+
+if DAPLINK_FLASH_ALGO
+
+config DAPLINK_FLASH_ALGO_STM32
+	bool "STM32 targets"
+	default y
+	help
+	  Include flash algorithms for STM32 targets (F0/F1/F2/F3/F4/F7/L0/L4).
+
+config DAPLINK_FLASH_ALGO_FREESCALE
+	bool "Freescale/NXP Kinetis targets"
+	default y
+	help
+	  Include flash algorithms for Kinetis K/L/KW/KE/KV series.
+
+config DAPLINK_FLASH_ALGO_NXP
+	bool "NXP LPC/i.MX targets"
+	default y
+	help
+	  Include flash algorithms for LPC11U/LPC43/LPC55/i.MX RT series.
+
+config DAPLINK_FLASH_ALGO_MAXIM
+	bool "Maxim targets"
+	default y
+	help
+	  Include flash algorithms for MAX32/MAX78 series.
+
+config DAPLINK_FLASH_ALGO_NUVOTON
+	bool "Nuvoton targets"
+	default y
+	help
+	  Include flash algorithms for NuMicro M48/M2 series.
+
+config DAPLINK_FLASH_ALGO_NORDIC
+	bool "Nordic targets"
+	default y
+	help
+	  Include flash algorithms for nRF51/nRF52 series.
+
+config DAPLINK_FLASH_ALGO_RENESAS
+	bool "Renesas targets"
+	default y
+	help
+	  Include flash algorithms for RA series.
+
+config DAPLINK_FLASH_ALGO_ARM
+	bool "ARM reference targets"
+	default y
+	help
+	  Include flash algorithms for ARM Musca reference designs.
+
+config DAPLINK_FLASH_ALGO_REALTEK
+	bool "Realtek targets"
+	default y
+
+config DAPLINK_FLASH_ALGO_AMBIQ
+	bool "Ambiq targets"
+	default y
+
+endif

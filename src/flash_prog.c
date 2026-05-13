@@ -16,7 +16,7 @@ LOG_MODULE_REGISTER(flash_prog, LOG_LEVEL_INF);
 #define FW_ENTRY        1
 #define DIR_ENTRY_SZ    32
 
-extern const program_target_t stm32f103_flash;
+extern const program_target_t * const flash_algo_table[];
 
 static uint32_t last_fw_size;
 static uint16_t last_fw_cluster;
@@ -126,7 +126,8 @@ void flash_prog_periodic(void)
     reset_hex_parser();
     uint32_t parsed = 0;
     hexfile_parse_status_t st = HEX_PARSE_OK;
-    const program_target_t *ft = &stm32f103_flash;
+    if (flash_algo_table[0] == NULL) { LOG_ERR("no flash algo"); return; }
+    const program_target_t *ft = flash_algo_table[0];
 
     if (flash_init(ft)) { LOG_ERR("flash init fail"); return; }
 
