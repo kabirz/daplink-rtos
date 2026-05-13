@@ -1,0 +1,11 @@
+build/
+.sisyphus/
+*.elf
+*.map
+*.bin
+*.hex
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+zephyr/
