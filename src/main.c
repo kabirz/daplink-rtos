@@ -6,7 +6,6 @@
 #include <zephyr/usb/class/usbd_hid.h>
 #include <zephyr/logging/log.h>
 #include <sample_usbd.h>
-#include "DAP_config.h"
 #include "DAP.h"
 #include "IO_Config.h"
 #include "usbd_user.h"

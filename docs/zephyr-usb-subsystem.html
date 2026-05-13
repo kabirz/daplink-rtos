@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zephyr USB 子系统深度分析</title>
+<style>
+:root {
+  --bg: #0f1117;
+  --bg-card: #1a1d2e;
+  --bg-card2: #232740;
+  --text: #e2e4f0;
+  --text-dim: #8b8fa8;
+  --accent: #6c8cff;
+  --accent2: #a78bfa;
+  --green: #34d399;
+  --orange: #fb923c;
+  --cyan: #22d3ee;
+  --pink: #f472b6;
+  --border: #2a2e42;
+  --code-bg: #131626;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; }
+.container { max-width: 1000px; margin: 0 auto; padding: 0 24px; }
+
+/* Hero */
+.hero { padding: 80px 0 60px; text-align: center; }
+.hero h1 { font-size: 3em; font-weight: 800; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 12px; letter-spacing: -0.02em; }
+.hero p { color: var(--text-dim); font-size: 1.15em; max-width: 600px; margin: 0 auto; }
+.hero .badge { display: inline-block; margin-top: 16px; padding: 6px 16px; border-radius: 20px; font-size: 0.85em; background: var(--bg-card); border: 1px solid var(--border); color: var(--text-dim); }
+
+/* Sections */
+section { padding: 48px 0; }
+section h2 { font-size: 1.6em; font-weight: 700; margin-bottom: 24px; display: flex; align-items: center; gap: 10px; }
+section h2 .icon { font-size: 1.2em; }
+section h3 { font-size: 1.15em; font-weight: 600; margin: 24px 0 12px; color: var(--accent); }
+section h4 { font-size: 1em; font-weight: 600; margin: 16px 0 8px; color: var(--cyan); }
+
+/* Cards */
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 28px; margin-bottom: 20px; }
+.card-title { font-size: 1.1em; font-weight: 700; margin-bottom: 8px; }
+.card-desc { color: var(--text-dim); font-size: 0.92em; }
+
+/* Grid */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+@media (max-width: 768px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+/* Architecture diagram */
+.arch { text-align: center; padding: 32px 0; }
+.arch svg { max-width: 100%; height: auto; }
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.9em; }
+th { color: var(--text-dim); font-weight: 600; font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.05em; }
+td { color: var(--text); }
+tr:hover td { background: rgba(108,140,255,0.04); }
+
+/* Code */
+code, pre { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px; padding: 18px; overflow-x: auto; margin: 12px 0; font-size: 0.85em; line-height: 1.6; }
+pre .kw { color: var(--accent); }
+pre .fn { color: var(--green); }
+pre .str { color: var(--orange); }
+pre .cm { color: var(--text-dim); }
+pre .tp { color: var(--cyan); }
+pre .num { color: var(--pink); }
+pre .macro { color: var(--accent2); }
+code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+pre code { background: none; padding: 0; }
+
+/* Tags */
+.tag { display: inline-block; padding: 2px 10px; border-radius: 6px; font-size: 0.75em; font-weight: 600; margin: 2px; }
+.tag-new { background: rgba(52,211,153,0.15); color: var(--green); }
+.tag-legacy { background: rgba(251,146,60,0.15); color: var(--orange); }
+.tag-core { background: rgba(108,140,255,0.15); color: var(--accent); }
+.tag-class { background: rgba(167,139,250,0.15); color: var(--accent2); }
+.tag-udc { background: rgba(34,211,238,0.15); color: var(--cyan); }
+
+/* Diagram boxes */
+.diagram { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 20px; }
+.diagram-box { padding: 14px 28px; border-radius: 10px; font-weight: 600; font-size: 0.9em; text-align: center; min-width: 160px; }
+.diagram-arrow { color: var(--text-dim); font-size: 1.2em; }
+.d-box-app { background: rgba(108,140,255,0.2); border: 1px solid var(--accent); color: var(--accent); }
+.d-box-class { background: rgba(167,139,250,0.2); border: 1px solid var(--accent2); color: var(--accent2); }
+.d-box-core { background: rgba(34,211,238,0.15); border: 1px solid var(--cyan); color: var(--cyan); }
+.d-box-udc { background: rgba(52,211,153,0.15); border: 1px solid var(--green); color: var(--green); }
+.d-box-hw { background: rgba(251,146,60,0.12); border: 1px solid var(--orange); color: var(--orange); }
+
+/* Divider */
+.divider { height: 1px; background: var(--border); margin: 16px 0; }
+
+/* File tree */
+.file-tree { font-family: 'JetBrains Mono', monospace; font-size: 0.85em; line-height: 1.8; padding: 18px; background: var(--code-bg); border-radius: 10px; border: 1px solid var(--border); }
+.file-tree .dir { color: var(--accent); font-weight: 600; }
+.file-tree .file { color: var(--text-dim); }
+.file-tree .active { color: var(--green); }
+
+.feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+.feature-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--code-bg); border-radius: 8px; font-size: 0.85em; }
+.feature-item .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dot-yes { background: var(--green); }
+.dot-partial { background: var(--orange); }
+.dot-no { background: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Zephyr USB 子系统</h1>
+  <p>v4.4.0 &mdash; 新架构 USB 设备栈 (device_next) 深度分析</p>
+  <span class="badge">源码: subsys/usb/ &amp; drivers/usb/</span>
+</div>
+
+<div class="container">
+
+<!-- ======================== 1. OVERVIEW ======================== -->
+<section>
+<h2><span class="icon">📋</span> 1. 整体架构</h2>
+
+<div class="card">
+  <p style="margin-bottom:12px">Zephyr RTOS 包含<strong>两套</strong> USB 设备栈：</p>
+  <table>
+    <tr><th></th><th><span class="tag tag-legacy">Legacy (device)</span></th><th><span class="tag tag-new">New (device_next)</span></th></tr>
+    <tr><td>引入版本</td><td>Zephyr 1.x</td><td>Zephyr 3.3+ (2022)</td></tr>
+    <tr><td>设计</td><td>回调式 + workqueue</td><td>线程化 + SPI / API 驱动</td></tr>
+    <tr><td>类驱动</td><td>CDC ACM, HID, MSC, BT</td><td>CDC ACM/ECM/NCM, HID, MSC, DFU, UAC2, UVC, MIDI2, Loopback, BT</td></tr>
+    <tr><td>UDC 驱动</td><td>usb_dc_* (原始寄存器)</td><td>udc_* (统一 UDC API)</td></tr>
+    <tr><td>状态</td><td><span class="tag tag-legacy">维护模式</span></td><td><span class="tag tag-new">推荐使用</span></td></tr>
+  </table>
+</div>
+
+<div class="arch">
+  <h3 style="margin-bottom:16px">分层架构</h3>
+  <div class="diagram">
+    <div class="diagram-box d-box-app">Application / Sample</div>
+    <div class="diagram-arrow">⬇ USBD_DEFINE_CLASS / USBD_DEVICE_DEFINE</div>
+    <div class="diagram-box d-box-class">Class Drivers (HID, CDC, MSC, DFU, ...)</div>
+    <div class="diagram-arrow">⬇ usbd_class_api (request, control_to_host, get_desc, ...)</div>
+    <div class="diagram-box d-box-core">USBD Core (device_next)</div>
+    <div class="diagram-arrow">⬇ udc_api (ep_enqueue, ep_set_halt, bus_suspend, ...)</div>
+    <div class="diagram-box d-box-udc">UDC Driver (stm32, dwc2, nrf, sam0, ...)</div>
+    <div class="diagram-arrow">⬇ HAL / Register Access</div>
+    <div class="diagram-box d-box-hw">USB Peripheral HW</div>
+  </div>
+</div>
+</section>
+
+<!-- ======================== 2. SOURCE MAP ======================== -->
+<section>
+<h2><span class="icon">📁</span> 2. 源码映射</h2>
+
+<div class="grid-2">
+<div class="card">
+  <div class="card-title">🔵 USB 设备栈核心</div>
+  <div class="file-tree">
+    <div><span class="dir">subsys/usb/</span></div>
+    <div>&nbsp;&nbsp;├─ <span class="dir">device_next/</span> <span class="tag tag-new">NEW</span></div>
+    <div>&nbsp;&nbsp;│&nbsp;&nbsp;├─ usbd_core.c &nbsp;&nbsp;<span class="cm">// 事件循环 + UDC 消息处理</span></div>
+    <div>&nbsp;&nbsp;│&nbsp;&nbsp;├─ usbd_device.c &nbsp;&nbsp;<span class="cm">// 设备描述符 / 配置管理</span></div>
+    <div>&nbsp;&nbsp;│&nbsp;&nbsp;├─ usbd_class.c &nbsp;&nbsp;<span class="cm">// 类实例注册 / 查找</span></div>
+    <div>&nbsp;&nbsp;│&nbsp;&nbsp;├─ usbd_config.c &nbsp;&nbsp;<span class="cm">// 配置描述符管理</span></div>
+    <div>&nbsp;&nbsp;│&nbsp;&nbsp;├─ usbd_ch9.c &nbsp;&nbsp;<span class="cm">// 标准请求处理 (Chapter 9)</span></div>
+    <div>&nbsp;&nbsp;│&nbsp;&nbsp;├─ usbd_desc.c &nbsp;&nbsp;<span class="cm">// 描述符分配 / 字符串</span></div>
+    <div>&nbsp;&nbsp;│&nbsp;&nbsp;├─ usbd_interface.c &nbsp;&nbsp;<span class="cm">// 接口管理</span></div>
+    <div>&nbsp;&nbsp;│&nbsp;&nbsp;├─ usbd_endpoint.c &nbsp;&nbsp;<span class="cm">// 端点管理</span></div>
+    <div>&nbsp;&nbsp;│&nbsp;&nbsp;├─ usbd_msg.c &nbsp;&nbsp;<span class="cm">// 通知消息</span></div>
+    <div>&nbsp;&nbsp;│&nbsp;&nbsp;├─ usbd_init.c &nbsp;&nbsp;<span class="cm">// 初始化流程</span></div>
+    <div>&nbsp;&nbsp;│&nbsp;&nbsp;└─ usbd_shell.c &nbsp;&nbsp;<span class="cm">// Shell 调试命令</span></div>
+    <div>&nbsp;&nbsp;├─ <span class="dir">device/</span> <span class="tag tag-legacy">LEGACY</span></div>
+    <div>&nbsp;&nbsp;│&nbsp;&nbsp;├─ usb_device.c &nbsp;&nbsp;<span class="cm">// 主循环</span></div>
+    <div>&nbsp;&nbsp;│&nbsp;&nbsp;├─ usb_descriptor.c &nbsp;&nbsp;<span class="cm">// 描述符</span></div>
+    <div>&nbsp;&nbsp;│&nbsp;&nbsp;└─ usb_transfer.c &nbsp;&nbsp;<span class="cm">// 传输层</span></div>
+    <div>&nbsp;&nbsp;└─ <span class="dir">usb_c/</span> &nbsp;&nbsp;<span class="cm">// USB-C / PD</span></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">🟢 Class Drivers</div>
+  <div class="file-tree">
+    <div><span class="dir">subsys/usb/device_next/class/</span></div>
+    <div>&nbsp;&nbsp;├─ usbd_cdc_acm.c &nbsp;&nbsp;<span class="cm">// 虚拟串口</span></div>
+    <div>&nbsp;&nbsp;├─ usbd_cdc_ecm.c &nbsp;&nbsp;<span class="cm">// 以太网控制模型</span></div>
+    <div>&nbsp;&nbsp;├─ usbd_cdc_ncm.c &nbsp;&nbsp;<span class="cm">// 网络控制模型</span></div>
+    <div>&nbsp;&nbsp;├─ usbd_hid.c &nbsp;&nbsp;<span class="cm">// HID 设备</span></div>
+    <div>&nbsp;&nbsp;├─ usbd_hid_api.c &nbsp;&nbsp;<span class="cm">// HID 应用 API</span></div>
+    <div>&nbsp;&nbsp;├─ usbd_msc.c &nbsp;&nbsp;<span class="cm">// 大容量存储</span></div>
+    <div>&nbsp;&nbsp;├─ usbd_msc_scsi.c &nbsp;&nbsp;<span class="cm">// SCSI 命令处理</span></div>
+    <div>&nbsp;&nbsp;├─ usbd_dfu.c &nbsp;&nbsp;<span class="cm">// 固件升级</span></div>
+    <div>&nbsp;&nbsp;├─ usbd_dfu_flash.c &nbsp;&nbsp;<span class="cm">// DFU Flash 后端</span></div>
+    <div>&nbsp;&nbsp;├─ usbd_uac2.c &nbsp;&nbsp;<span class="cm">// USB Audio 2.0</span></div>
+    <div>&nbsp;&nbsp;├─ usbd_uvc.c &nbsp;&nbsp;<span class="cm">// USB Video</span></div>
+    <div>&nbsp;&nbsp;├─ usbd_midi2.c &nbsp;&nbsp;<span class="cm">// MIDI 2.0</span></div>
+    <div>&nbsp;&nbsp;├─ bt_hci.c &nbsp;&nbsp;<span class="cm">// Bluetooth HCI</span></div>
+    <div>&nbsp;&nbsp;└─ loopback.c &nbsp;&nbsp;<span class="cm">// 测试用回环</span></div>
+  </div>
+</div>
+</div>
+
+</section>
+
+
+<!-- ======================== 3. device_next 深度分析 ======================== -->
+<section>
+<h2><span class="icon">⚙️</span> 3. device_next 架构深度分析</h2>
+
+<div class="card">
+  <h3>3.1 线程化事件驱动模型</h3>
+  <p>device_next 使用<strong>独立内核线程</strong>处理 USB 事件，区别于 legacy 的 workqueue 模式：</p>
+  <pre><span class="kw">static</span> <span class="tp">K_KERNEL_STACK_DEFINE</span>(usbd_stack, CONFIG_USBD_THREAD_STACK_SIZE);
+<span class="kw">static</span> <span class="kw">struct</span> <span class="tp">k_thread</span> usbd_thread_data;
+
+<span class="cm">/* UDC 中断 → 消息队列 → 线程处理 */</span>
+<span class="tp">K_MSGQ_DEFINE</span>(usbd_msgq, <span class="kw">sizeof</span>(<span class="kw">struct</span> <span class="tp">udc_event</span>),
+              CONFIG_USBD_MAX_UDC_MSG, <span class="num">4</span>);
+
+<span class="cm">/* 事件类型 */</span>
+<span class="kw">enum</span> <span class="tp">udc_event_type</span> {
+    UDC_EVT_BUS_RESET,       <span class="cm">// USB 总线复位</span>
+    UDC_EVT_BUS_SUSPEND,     <span class="cm">// 总线挂起</span>
+    UDC_EVT_BUS_RESUME,      <span class="cm">// 总线唤醒</span>
+    UDC_EVT_SETUP_RECEIVED,  <span class="cm">// SETUP 包到达</span>
+    UDC_EVT_EP_REQUEST,      <span class="cm">// 端点传输完成</span>
+    UDC_EVT_VBUS_READY,      <span class="cm">// VBUS 就绪</span>
+    UDC_EVT_VBUS_REMOVED,    <span class="cm">// VBUS 断开</span>
+    UDC_EVT_ERROR,           <span class="cm">// 错误</span>
+};</pre>
+  <p style="margin-top:8px">线程在 <code>usbd_core.c</code> 中初始化，通过 <code>k_msgq_get</code> 等待事件，调用 <code>usbd_event_handler</code> 分发处理。</p>
+</div>
+
+<div class="card">
+  <h3>3.2 类驱动注册机制</h3>
+  <p>类驱动通过 <strong>USBD_DEFINE_CLASS</strong> 宏注册，利用链接器节(section)迭代实现自动发现：</p>
+  <pre><span class="macro">USBD_DEFINE_CLASS</span>(class_name, &class_api, &private_data, &vendor_reqs);
+<span class="cm">// 展开为:</span>
+<span class="kw">static</span> <span class="kw">struct</span> <span class="tp">usbd_class_data</span> class_name = {
+    .name   = <span class="str">"class_name"</span>,
+    .api    = class_api,
+    .v_reqs = vendor_reqs,
+    .priv   = private_data,
+};
+<span class="kw">static</span> <span class="tp">STRUCT_SECTION_ITERABLE_ALTERNATE</span>(usbd_class_fs, usbd_class_node, ...) = {
+    .c_data = &class_name,
+};</pre>
+  <p>所有类实例通过 <code>STRUCT_SECTION_FOREACH_ALTERNATE(usbd_class_fs, ...)</code> 自动迭代，无需手动注册数组。</p>
+  <p style="margin-top:12px"><strong>类 API (<code>struct usbd_class_api</code>)</strong> 定义了 12 个回调：</p>
+  <div class="feature-grid">
+    <div class="feature-item"><span class="dot dot-yes"></span> <code>init</code> — 初始化</div>
+    <div class="feature-item"><span class="dot dot-yes"></span> <code>enable</code> — 配置生效</div>
+    <div class="feature-item"><span class="dot dot-yes"></span> <code>disable</code> — 配置禁用</div>
+    <div class="feature-item"><span class="dot dot-yes"></span> <code>update</code> — 接口更新</div>
+    <div class="feature-item"><span class="dot dot-yes"></span> <code>request</code> — 传输完成</div>
+    <div class="feature-item"><span class="dot dot-yes"></span> <code>get_desc</code> — 获取描述符</div>
+    <div class="feature-item"><span class="dot dot-yes"></span> <code>control_to_host</code> — 控制 IN</div>
+    <div class="feature-item"><span class="dot dot-yes"></span> <code>control_to_dev</code> — 控制 OUT</div>
+    <div class="feature-item"><span class="dot dot-yes"></span> <code>feature_halt</code> — 端点停止</div>
+    <div class="feature-item"><span class="dot dot-yes"></span> <code>suspended</code> — 挂起</div>
+    <div class="feature-item"><span class="dot dot-yes"></span> <code>resumed</code> — 唤醒</div>
+    <div class="feature-item"><span class="dot dot-yes"></span> <code>shutdown</code> — 关闭</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>3.3 初始化流程</h3>
+  <pre><span class="cm">// 1. 定义设备上下文</span>
+<span class="macro">USBD_DEVICE_DEFINE</span>(my_usbd, DEVICE_DT_GET(DT_NODELABEL(zephyr_udc0)),
+                   <span class="num">0x2fe3</span>, <span class="num">0x0001</span>);
+
+<span class="cm">// 2. 定义字符串描述符</span>
+<span class="macro">USBD_DESC_LANG_DEFINE</span>(my_lang);
+<span class="macro">USBD_DESC_MANUFACTURER_DEFINE</span>(my_mfr, <span class="str">"My Company"</span>);
+<span class="macro">USBD_DESC_PRODUCT_DEFINE</span>(my_prod, <span class="str">"My Device"</span>);
+
+<span class="cm">// 3. 定义配置</span>
+<span class="macro">USBD_CONFIGURATION_DEFINE</span>(my_config, USB_SCD_SELF_POWERED, <span class="num">125</span>, &fs_cfg_desc);
+
+<span class="cm">// 4. 注册类驱动 (自动通过链接器节迭代)</span>
+<span class="cm">// 类实例通过 USBD_DEFINE_CLASS 宏静态注册</span>
+
+<span class="cm">// 5. 初始化</span>
+<span class="kw">struct</span> <span class="tp">usbd_context</span> *ctx = my_usbd;
+usbd_init(ctx);       <span class="cm">// ← usbd_init.c: 初始化配置、接口、端点、类</span>
+usbd_enable(ctx);     <span class="cm">// ← 使能 UDC 控制器</span></pre>
+</div>
+
+<div class="card">
+  <h3>3.4 描述符管理</h3>
+  <p>device_next 提供了一套 <strong>类型安全的描述符构建 API</strong>，不再需要手动拼字节：</p>
+  <table>
+    <tr><th>宏</th><th>作用</th></tr>
+    <tr><td><code>USBD_DEVICE_DEFINE(ctx, dev, vid, pid)</code></td><td>定义设备上下文</td></tr>
+    <tr><td><code>USBD_DESC_LANG_DEFINE(name)</code></td><td>语言 ID 描述符</td></tr>
+    <tr><td><code>USBD_DESC_MANUFACTURER_DEFINE(name, str)</code></td><td>厂商字符串</td></tr>
+    <tr><td><code>USBD_DESC_PRODUCT_DEFINE(name, str)</code></td><td>产品字符串</td></tr>
+    <tr><td><code>USBD_DESC_SERIAL_NUMBER_DEFINE(name)</code></td><td>序列号 (HWINFO 派生)</td></tr>
+    <tr><td><code>USBD_CONFIGURATION_DEFINE(name, attr, mpower, desc)</code></td><td>配置描述符</td></tr>
+    <tr><td><code>USBD_DESC_BOS_DEFINE(name, size, caps)</code></td><td>BOS 能力描述符</td></tr>
+  </table>
+  <p style="margin-top:12px">描述符在 <code>usbd_desc.c</code> 中管理，支持 FS/HS 双速度描述符自动切换。</p>
+</div>
+</section>
+
+
+<!-- ======================== 4. CLASS DRIVERS ======================== -->
+<section>
+<h2><span class="icon">🔌</span> 4. 类驱动详解</h2>
+
+<div class="grid-2">
+
+<div class="card">
+  <div class="card-title"><span class="tag tag-class">HID</span> 人机交互设备</div>
+  <div class="card-desc">
+    <p>源码: <code>usbd_hid.c</code> + <code>usbd_hid_api.c</code></p>
+    <p style="margin-top:8px">支持 IN/OUT 中断端点。应用通过 <code>hid_device_register()</code> 注册报告描述符和回调：</p>
+    <ul style="margin:8px 0 0 16px;color:var(--text-dim);font-size:0.9em">
+      <li><code>iface_ready</code> — 接口就绪</li>
+      <li><code>get_report</code> / <code>set_report</code> — 控制端点报告</li>
+      <li><code>output_report</code> — 中断 OUT 报告</li>
+      <li><code>input_report_done</code> — 输入报告发送完成</li>
+      <li><code>hid_device_submit_report()</code> — 提交输入报告</li>
+    </ul>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="tag tag-class">CDC ACM</span> 虚拟串口</div>
+  <div class="card-desc">
+    <p>源码: <code>usbd_cdc_acm.c</code></p>
+    <p style="margin-top:8px">通过 <span class="tag tag-class">uart-bridge</span> 驱动实现全双工 CDC ACM ↔ UART 桥接。</p>
+    <p style="margin-top:6px">DT 配置：</p>
+    <pre style="font-size:0.8em">&zephyr_udc0 {
+    cdc_acm_uart0: cdc_acm_uart0 {
+        compatible = <span class="str">"zephyr,cdc-acm-uart"</span>;
+    };
+};
+/ {
+    uart-bridge0 {
+        compatible = <span class="str">"zephyr,uart-bridge"</span>;
+        peers = <&cdc_acm_uart0 &uart1>;
+    };
+};</pre>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="tag tag-class">MSC</span> 大容量存储</div>
+  <div class="card-desc">
+    <p>源码: <code>usbd_msc.c</code> + <code>usbd_msc_scsi.c</code></p>
+    <p style="margin-top:8px">实现 SCSI 命令集 + BULK-ONLY 传输 (BBB)。配合 <code>USBD_DEFINE_MSC_LUN()</code> 注册磁盘。</p>
+    <p style="margin-top:6px">磁盘通过 <code>disk_access_*</code> API 访问，支持 RAM disk、SD 卡、Flash 等后端。</p>
+    <pre style="font-size:0.8em"><span class="cm">// 注册 RAM disk 为 LUN</span>
+<span class="macro">USBD_DEFINE_MSC_LUN</span>(<span class="num">0</span>, <span class="str">"RAMDISK"</span>,
+                    <span class="str">"VENDOR"</span>, <span class="str">"PRODUCT"</span>, <span class="str">"1.0"</span>);</pre>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="tag tag-class">DFU</span> 固件升级</div>
+  <div class="card-desc">
+    <p>源码: <code>usbd_dfu.c</code> + <code>usbd_dfu_flash.c</code></p>
+    <p style="margin-top:8px">USB DFU 1.1 标准实现，支持 runtime/DFU 双模式。</p>
+    <p style="margin-top:6px">DFU mode 时通过 Flash API 擦写内部/外部 Flash。</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="tag tag-class">UAC2</span> USB Audio 2.0</div>
+  <div class="card-desc">
+    <p>源码: <code>usbd_uac2.c</code></p>
+    <p style="margin-top:8px">支持异步等时端点，多通道音频流。适用于 USB 麦克风/音箱设备。</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="tag tag-class">UVC</span> USB Video</div>
+  <div class="card-desc">
+    <p>源码: <code>usbd_uvc.c</code></p>
+    <p style="margin-top:8px">USB Video Class 实现，支持等时视频流传输。</p>
+  </div>
+</div>
+
+</div>
+</section>
+
+
+<!-- ======================== 5. UDC DRIVERS ======================== -->
+<section>
+<h2><span class="icon">📟</span> 5. UDC 驱动层 —<span class="tag tag-udc">udc_*</span></h2>
+
+<div class="card">
+  <p>UDC (USB Device Controller) 驱动是 device_next 栈的硬件抽象层。所有 UDC 驱动实现统一的 <code>struct udc_api</code> 接口：</p>
+  <div class="grid-2" style="margin-top:12px">
+    <div>
+      <strong>核心 API</strong>
+      <div class="feature-item"><span class="dot dot-yes"></span> <code>init</code> — 初始化控制器</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> <code>enable</code> — 使能</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> <code>disable</code> — 禁用</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> <code>set_address</code> — 设地址</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> <code>ep_set_halt</code> — 端点停止</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> <code>ep_enqueue</code> — 提交传输</div>
+    </div>
+    <div>
+      <strong>能力</strong>
+      <div class="feature-item"><span class="dot dot-yes"></span> <code>caps.hs</code> — 高速支持</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> <code>caps.rwup</code> — 远程唤醒</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> <code>caps.can_detect_vbus</code> — VBUS 检测</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> <code>caps.mps0</code> — EP0 最大包</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> <code>caps.addr_before_status</code> — 地址时序</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>支持的 UDC 驱动</h3>
+  <table>
+    <tr><th>驱动</th><th>SoC 系列</th><th>USB IP</th><th>高速</th><th>VBUS 检测</th></tr>
+    <tr><td><code>udc_stm32.c</code></td><td>STM32 F0/F1/F3/F4/G0/G4/L0/L4/L5/U5/WB</td><td>OTG FS/HS + ST USB</td><td><span class="tag tag-new">OTG HS</span></td><td><span class="tag tag-new">OTG</span></td></tr>
+    <tr><td><code>udc_dwc2.c</code></td><td>ESP32-S3, nRF54H, nRF92</td><td>Synopsys DWC2</td><td>✅</td><td>nRF HS</td></tr>
+    <tr><td><code>udc_nrf.c</code></td><td>nRF52840, nRF5340, nRF54L</td><td>Nordic USBD</td><td>❌</td><td>✅</td></tr>
+    <tr><td><code>udc_kinetis.c</code></td><td>NXP K20, K22, KL25, KL26</td><td>Kinetis USB</td><td>❌</td><td>❌</td></tr>
+    <tr><td><code>udc_mcux.c</code></td><td>NXP i.MX RT, LPC</td><td>MCUX USB</td><td>✅</td><td>❌</td></tr>
+    <tr><td><code>udc_sam0.c</code></td><td>Microchip SAM D5x/E5x</td><td>SAM0 USB</td><td>❌</td><td>❌</td></tr>
+    <tr><td><code>udc_sam_usbc.c</code></td><td>Microchip SAM4/SAMG/SAMS</td><td>SAM USBC</td><td>✅</td><td>✅</td></tr>
+    <tr><td><code>udc_sam_udp.c</code></td><td>Microchip SAM7/SAM9</td><td>SAM UDP</td><td>❌</td><td>❌</td></tr>
+    <tr><td><code>udc_dwc2.c</code></td><td>ESP32-S3</td><td>DWC2</td><td>✅</td><td>❌</td></tr>
+    <tr><td><code>udc_smartbond.c</code></td><td>Renesas Smartbond DA14/DA15</td><td>Smartbond USB</td><td>❌</td><td>❌</td></tr>
+    <tr><td><code>udc_max32.c</code></td><td>ADI MAX32</td><td>MAX32 USB</td><td>❌</td><td>❌</td></tr>
+    <tr><td><code>udc_bflb_v1.c</code></td><td>Bouffalo Lab BL602/BL702</td><td>BFLB USB</td><td>❌</td><td>❌</td></tr>
+    <tr><td><code>udc_numaker.c</code></td><td>Nuvoton NuMicro M48</td><td>Numaker USB</td><td>❌</td><td>❌</td></tr>
+    <tr><td><code>udc_ambiq.c</code></td><td>Ambiq Apollo4</td><td>Ambiq USB</td><td>❌</td><td>❌</td></tr>
+    <tr><td><code>udc_it82xx2.c</code></td><td>ITE IT82xx2</td><td>ITE USB</td><td>❌</td><td>❌</td></tr>
+    <tr><td><code>udc_renesas_ra.c</code></td><td>Renesas RA</td><td>Renesas USB</td><td>❌</td><td>❌</td></tr>
+    <tr><td><code>udc_virtual.c</code></td><td>仿真/测试</td><td>虚拟</td><td>❌</td><td>❌</td></tr>
+  </table>
+</div>
+
+<div class="grid-2">
+<div class="card">
+  <h4>STM32 UDC 驱动剖析 (<code>udc_stm32.c</code>)</h4>
+  <p style="font-size:0.9em;color:var(--text-dim);margin-bottom:8px">支持三种 USB IP：</p>
+  <table style="font-size:0.85em">
+    <tr><th>DT Compat</th><th>USB IP</th><th>SoC 示例</th></tr>
+    <tr><td><code>st,stm32-otgfs</code></td><td>OTG_FS</td><td>F4, F7, H7</td></tr>
+    <tr><td><code>st,stm32-otghs</code></td><td>OTG_HS</td><td>F7, H7</td></tr>
+    <tr><td><code>st,stm32-usb</code></td><td>ST USB (PCD)</td><td>F0, F1, F3, G0</td></tr>
+  </table>
+  <p style="margin-top:8px;font-size:0.9em;color:var(--text-dim)">驱动通过 <code>DT_DRV_COMPAT</code> 多实例编译，自动适配不同 USB IP。OTG 支持 HS 和 VBUS 检测；ST USB 仅 FS。</p>
+</div>
+
+<div class="card">
+  <h4>类驱动 vs DT 节点</h4>
+  <p style="font-size:0.9em;color:var(--text-dim);margin-bottom:8px">大部分类驱动需要 DT 节点配合：</p>
+  <table style="font-size:0.85em">
+    <tr><th>类</th><th>DT Compat</th><th>Kconfig</th></tr>
+    <tr><td>HID</td><td><code>zephyr,hid-device</code></td><td>USBD_HID_SUPPORT</td></tr>
+    <tr><td>CDC ACM</td><td><code>zephyr,cdc-acm-uart</code></td><td>USBD_CDC_ACM_CLASS</td></tr>
+    <tr><td>MSC</td><td>— (LUN 注册)</td><td>USBD_MSC_CLASS</td></tr>
+    <tr><td>DFU</td><td>— (自动注册)</td><td>USBD_DFU</td></tr>
+    <tr><td>Loopback</td><td>— (Kconfig 实例)</td><td>USBD_LOOPBACK_CLASS</td></tr>
+  </table>
+</div>
+</div>
+
+</section>
+
+
+<!-- ======================== 6. LEGACY STACK ======================== -->
+<section>
+<h2><span class="icon">📜</span> 6. Legacy 设备栈（维护模式）</h2>
+
+<div class="grid-2">
+<div class="card">
+  <div class="card-title">架构</div>
+  <ul style="margin:8px 0 0 16px;color:var(--text-dim);font-size:0.9em;line-height:2">
+    <li>基于 <code>usb_device.c</code> 的状态机</li>
+    <li>回调式：<code>usb_dc_*()</code> 直接操作 UDC 寄存器</li>
+    <li>workqueue 处理事件</li>
+    <li>手动管理描述符缓冲区</li>
+  </ul>
+</div>
+<div class="card">
+  <div class="card-title">类驱动</div>
+  <div class="feature-grid" style="margin-top:8px">
+    <div class="feature-item"><span class="dot dot-partial"></span> CDC ACM</div>
+    <div class="feature-item"><span class="dot dot-partial"></span> HID</div>
+    <div class="feature-item"><span class="dot dot-partial"></span> MSC</div>
+    <div class="feature-item"><span class="dot dot-partial"></span> DFU</div>
+    <div class="feature-item"><span class="dot dot-partial"></span> Bluetooth</div>
+    <div class="feature-item"><span class="dot dot-partial"></span> RNDIS/ECM</div>
+  </div>
+  <p style="margin-top:8px;font-size:0.85em;color:var(--text-dim)">所有 legacy 类驱动位于 <code>subsys/usb/device/class/</code></p>
+</div>
+</div>
+</section>
+
+
+<!-- ======================== 7. USB HOST ======================== -->
+<section>
+<h2><span class="icon">🖥️</span> 7. USB Host 支持</h2>
+
+<div class="grid-2">
+<div class="card">
+  <div class="card-title">USB Host Stack</div>
+  <p style="color:var(--text-dim);font-size:0.9em;margin-top:4px">源码: <code>subsys/usb/host/</code></p>
+  <div class="feature-grid" style="margin-top:8px">
+    <div class="feature-item"><span class="dot dot-yes"></span> Hub 驱动</div>
+    <div class="feature-item"><span class="dot dot-yes"></span> Mass Storage Host</div>
+    <div class="feature-item"><span class="dot dot-yes"></span> HID Host</div>
+    <div class="feature-item"><span class="dot dot-partial"></span> UVC Host</div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-title">USB-C / PD</div>
+  <p style="color:var(--text-dim);font-size:0.9em;margin-top:4px">源码: <code>subsys/usb/usb_c/</code></p>
+  <div class="feature-grid" style="margin-top:8px">
+    <div class="feature-item"><span class="dot dot-yes"></span> USB-C 状态机</div>
+    <div class="feature-item"><span class="dot dot-yes"></span> 供电角色协商</div>
+    <div class="feature-item"><span class="dot dot-yes"></span> 数据角色交换</div>
+  </div>
+</div>
+</div>
+</section>
+
+
+<!-- ======================== 8. CONFIGURATION SUMMARY ======================== -->
+<section>
+<h2><span class="icon">⚡</span> 8. 关键 Kconfig 配置</h2>
+
+<div class="card">
+  <table>
+    <tr><th>配置项</th><th>默认</th><th>说明</th></tr>
+    <tr><td><code>USB_DEVICE_STACK_NEXT</code></td><td>n</td><td>启用新 USB 设备栈（推荐）</td></tr>
+    <tr><td><code>USBD_MAX_SPEED</code></td><td>FS/HS</td><td>最大 USB 速度，HS 需 UDC 支持</td></tr>
+    <tr><td><code>USBD_BOS_SUPPORT</code></td><td>y</td><td>BOS 描述符（WinUSB/WebUSB 需要）</td></tr>
+    <tr><td><code>USBD_VREQ_SUPPORT</code></td><td>y</td><td>厂商请求支持</td></tr>
+    <tr><td><code>USBD_THREAD_STACK_SIZE</code></td><td>1024</td><td>USB 设备栈线程栈</td></tr>
+    <tr><td><code>USBD_MAX_UDC_MSG</code></td><td>10</td><td>UDC 事件队列深度</td></tr>
+    <tr><td><code>USBD_CDC_ACM_CLASS</code></td><td>n</td><td>CDC ACM 类</td></tr>
+    <tr><td><code>USBD_HID_SUPPORT</code></td><td>n</td><td>HID 类</td></tr>
+    <tr><td><code>USBD_MSC_CLASS</code></td><td>n</td><td>MSC 大容量存储类</td></tr>
+    <tr><td><code>USBD_DFU</code></td><td>n</td><td>DFU 固件升级</td></tr>
+    <tr><td><code>USBD_AUDIO2_CLASS</code></td><td>n</td><td>UAC2 音频</td></tr>
+    <tr><td><code>USBD_VIDEO_CLASS</code></td><td>n</td><td>UVC 视频</td></tr>
+    <tr><td><code>UART_BRIDGE</code></td><td>n</td><td>UART 桥接驱动（CDC ACM ⇄ UART）</td></tr>
+    <tr><td><code>UDC_STM32</code></td><td>y*</td><td>STM32 UDC 驱动 (*自动选择)</td></tr>
+  </table>
+</div>
+</section>
+
+
+<!-- ======================== 9. HOW TO USE ======================== -->
+<section>
+<h2><span class="icon">🚀</span> 9. 快速开始</h2>
+
+<div class="card">
+  <h3>最小 HID 设备示例</h3>
+  <pre><span class="cm">// prj.conf</span>
+CONFIG_USB_DEVICE_STACK_NEXT=y
+CONFIG_USBD_HID_SUPPORT=y
+CONFIG_SAMPLE_USBD_VID=<span class="num">0x2fe3</span>
+CONFIG_SAMPLE_USBD_PID=<span class="num">0x0007</span>
+
+<span class="cm">// app.overlay</span>
+&zephyr_udc0 {
+    hid_dev0 {
+        compatible = <span class="str">"zephyr,hid-device"</span>;
+        in-report-size = <span class="num">64</span>;
+        in-polling-period-us = <span class="num">1000</span>;
+    };
+};
+
+<span class="cm">// main.c</span>
+<span class="kw">#include</span> <span class="str">&lt;zephyr/usb/usbd.h&gt;</span>
+<span class="kw">#include</span> <span class="str">&lt;zephyr/usb/class/usbd_hid.h&gt;</span>
+
+<span class="macro">LOG_MODULE_REGISTER</span>(main, LOG_LEVEL_INF);
+
+<span class="kw">static</span> <span class="kw">const</span> <span class="tp">uint8_t</span> report_desc[] = {
+    <span class="num">0x06</span>, <span class="num">0x00</span>, <span class="num">0xFF</span>,  <span class="cm">// Vendor defined</span>
+    <span class="num">0x09</span>, <span class="num">0x01</span>, <span class="num">0xA1</span>, <span class="num">0x01</span>,
+    <span class="num">0x15</span>, <span class="num">0x00</span>, <span class="num">0x26</span>, <span class="num">0xFF</span>, <span class="num">0x00</span>,
+    <span class="num">0x75</span>, <span class="num">0x08</span>, <span class="num">0x95</span>, <span class="num">0x40</span>,  <span class="cm">// 64 byte report</span>
+    <span class="num">0x09</span>, <span class="num">0x01</span>, <span class="num">0x81</span>, <span class="num">0x02</span>,
+    <span class="num">0x09</span>, <span class="num">0x01</span>, <span class="num">0x91</span>, <span class="num">0x02</span>,
+    <span class="num">0xC0</span>
+};
+
+<span class="kw">static</span> <span class="kw">const</span> <span class="kw">struct</span> <span class="tp">hid_device_ops</span> ops = {
+    .set_report = my_set_report,
+};
+
+<span class="tp">int</span> <span class="fn">main</span>(<span class="tp">void</span>)
+{
+    <span class="kw">struct</span> <span class="tp">usbd_context</span> *ctx = sample_usbd_init_device(msg_cb);
+    <span class="tp">hid_device_register</span>(hid_dev, report_desc, <span class="kw">sizeof</span>(report_desc), &ops);
+    <span class="tp">usbd_enable</span>(ctx);
+    <span class="k">return</span> <span class="num">0</span>;
+}</pre>
+</div>
+
+<div class="card">
+  <h3>构建命令</h3>
+  <pre>$ west build -b black_f407ve .
+$ west flash</pre>
+  <p style="color:var(--text-dim);font-size:0.9em;margin-top:8px">Zephyr 自动处理 UDC 驱动选择、DT 编译、链接器节迭代。</p>
+</div>
+</section>
+
+
+<!-- ======================== 10. REFERENCE ======================== -->
+<section>
+<h2><span class="icon">📚</span> 10. 参考</h2>
+
+<div class="grid-3">
+<div class="card">
+  <div class="card-title">核心位置</div>
+  <ul style="margin:8px 0 0 16px;color:var(--text-dim);font-size:0.85em;line-height:2">
+    <li><code>include/zephyr/usb/usbd.h</code></li>
+    <li><code>include/zephyr/drivers/usb/udc.h</code></li>
+    <li><code>subsys/usb/device_next/</code></li>
+    <li><code>drivers/usb/udc/</code></li>
+  </ul>
+</div>
+<div class="card">
+  <div class="card-title">关键文档</div>
+  <ul style="margin:8px 0 0 16px;color:var(--text-dim);font-size:0.85em;line-height:2">
+    <li>USB 2.0 Spec Chapter 9</li>
+    <li>Zephyr USB 文档</li>
+    <li>CMSIS-DAP v2.1.0</li>
+    <li>各 SoC 参考手册</li>
+  </ul>
+</div>
+<div class="card">
+  <div class="card-title">调试工具</div>
+  <ul style="margin:8px 0 0 16px;color:var(--text-dim);font-size:0.85em;line-height:2">
+    <li><code>west build -t usbd_shell</code></li>
+    <li><code>lsusb -v</code> — 查看描述符</li>
+    <li><code>Wireshark + usbmon</code></li>
+    <li>Saleae Logic Analyzer</li>
+  </ul>
+</div>
+</div>
+</section>
+
+
+<!-- Footer -->
+<div style="text-align:center;padding:40px 0 60px;color:var(--text-dim);font-size:0.85em">
+  <p>Generated from Zephyr v4.4.0 &mdash; <code>subsys/usb/</code></p>
+  <p style="margin-top:4px">Zephyr 新 USB 设备栈（device_next）始于 2022 年，由 Nordic Semiconductor 主导开发</p>
+</div>
+
+</div>
+</body>
+</html>
