@@ -4,9 +4,13 @@
 #include "DAP_config.h"
 #include "DAP.h"
 
-#define TARGET_UART_NODE DT_NODELABEL(usart2)
+/* Second peer of uart-bridge is the target UART:
+ *   peers = <&cdc_acm_uart0 &usart2>;  → idx 1
+ */
+#define UART_BRIDGE_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(zephyr_uart_bridge)
 
-#if DT_NODE_EXISTS(TARGET_UART_NODE)
+#if DT_NODE_EXISTS(UART_BRIDGE_NODE)
+#define TARGET_UART_NODE DT_PHANDLE_BY_IDX(UART_BRIDGE_NODE, peers, 1)
 static const struct device *const target_uart = DEVICE_DT_GET(TARGET_UART_NODE);
 #else
 static const struct device *const target_uart = NULL;
