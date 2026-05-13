@@ -1,7 +1,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
-#include "DAP_config.h"
 #include "DAP.h"
 
 /* Second peer of uart-bridge is the target UART:
@@ -66,23 +65,4 @@ uint8_t DAP_UART_Status(void)
     return s;
 }
 
-uint16_t DAP_UART_Read(uint8_t *buf)
-{
-    if (!uart_active || !target_uart) return 0;
-    uint16_t cnt = 0;
-    while (cnt < DAP_PACKET_SIZE - 1) {
-        if (uart_poll_in(target_uart, &buf[cnt]) != 0) break;
-        cnt++;
-    }
-    return cnt;
-}
 
-uint16_t DAP_UART_Write(const uint8_t *buf)
-{
-    if (!uart_active || !target_uart) return 0;
-    uint16_t len = buf[0];
-    for (uint16_t i = 0; i < len && i < DAP_PACKET_SIZE - 1; i++) {
-        uart_poll_out(target_uart, buf[1 + i]);
-    }
-    return len;
-}
