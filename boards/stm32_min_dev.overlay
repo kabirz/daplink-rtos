@@ -32,6 +32,11 @@
 		};
 	};
 
+	uart-bridge0 {
+		compatible = "zephyr,uart-bridge";
+		peers = <&cdc_acm_uart0 &usart2>;
+	};
+
 	leds {
 		compatible = "gpio-leds";
 		hid_led: hid_led {

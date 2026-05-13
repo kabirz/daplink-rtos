@@ -1,6 +1,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/uart/uart_bridge.h>
 #include <zephyr/usb/usbd.h>
 #include <zephyr/usb/class/usbd_hid.h>
 #include <zephyr/logging/log.h>
@@ -15,9 +16,13 @@ LOG_MODULE_REGISTER(daplink, LOG_LEVEL_INF);
 static struct usbd_context *sample_usbd;
 
 #define HID_LED_NODE DT_ALIAS(hid_led)
-#if DT_NODE_EXISTS(DT_ALIAS(cdc_led))
 #define CDC_LED_NODE DT_ALIAS(cdc_led)
-#endif
+
+#define DEVICE_DT_GET_COMMA(node_id) DEVICE_DT_GET(node_id)
+
+static const struct device *uart_bridges[] = {
+	DT_FOREACH_STATUS_OKAY(zephyr_uart_bridge, DEVICE_DT_GET_COMMA)
+};
 
 #if DT_NODE_EXISTS(HID_LED_NODE)
 static const struct gpio_dt_spec hid_led = GPIO_DT_SPEC_GET(HID_LED_NODE, gpios);
@@ -46,7 +51,7 @@ void main_blink_hid_led(void)
 }
 
 #if defined(CDC_LED_NODE) && DT_NODE_EXISTS(CDC_LED_NODE)
-void main_blink_cdc_led(void)
+__attribute__((weak)) void main_blink_cdc_led(void)
 {
     cdc_activity = true;
     activity_tick = k_uptime_get();
@@ -92,8 +97,11 @@ static void msg_cb(struct usbd_context *const ctx, const struct usbd_msg *msg)
             usb_state = USB_DISCONNECTED;
         }
     }
-    if (msg->type == USBD_MSG_CDC_ACM_CONTROL_LINE_STATE) {
-        LOG_INF("CDC line state");
+    if (msg->type == USBD_MSG_CDC_ACM_LINE_CODING ||
+        msg->type == USBD_MSG_CDC_ACM_CONTROL_LINE_STATE) {
+        for (size_t i = 0; i < ARRAY_SIZE(uart_bridges); i++) {
+            uart_bridge_settings_update(msg->dev, uart_bridges[i]);
+        }
     }
 }
 
@@ -142,8 +150,6 @@ int main(void)
 
     ret = daplink_hid_init(sample_usbd);
     if (ret) LOG_ERR("HID failed: %d", ret);
-    ret = daplink_cdc_acm_init(sample_usbd);
-    if (ret) LOG_ERR("CDC failed: %d", ret);
 
     LOG_INF("DAPLink ready");
 

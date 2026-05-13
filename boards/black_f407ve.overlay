@@ -43,6 +43,11 @@
 		};
 	};
 
+	uart-bridge0 {
+		compatible = "zephyr,uart-bridge";
+		peers = <&cdc_acm_uart0 &usart2>;
+	};
+
 	ram_disk0: ram_disk0 {
 		compatible = "zephyr,ram-disk";
 		disk-name = "DAPLINK";

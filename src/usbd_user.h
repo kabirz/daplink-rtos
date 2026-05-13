@@ -4,7 +4,6 @@
 #include <zephyr/usb/usbd.h>
 
 int daplink_hid_init(struct usbd_context *usbd_ctx);
-int daplink_cdc_acm_init(struct usbd_context *usbd_ctx);
 
 void main_blink_hid_led(void);
 void main_blink_cdc_led(void);
