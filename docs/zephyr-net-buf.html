@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zephyr net_buf 缓冲区详解</title>
+<style>
+:root {
+  --bg: #ffffff; --bg-card: #f8f9fc; --bg-card2: #f0f2f8;
+  --text: #1a1c2e; --text-dim: #6b6f88;
+  --accent: #4a6cf7; --accent2: #7c5cfc;
+  --green: #10b981; --orange: #f59e0b;
+  --cyan: #0ea5e9; --pink: #ec4899;
+  --border: #e2e4f0; --code-bg: #f4f6fc;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height:1.7; }
+.container { max-width: 1000px; margin:0 auto; padding:0 24px; }
+.hero { padding:60px 0 40px; text-align:center; }
+.hero h1 { font-size:2.6em; font-weight:800; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:8px; }
+.hero p { color:var(--text-dim); font-size:1.05em; }
+.hero .badge { display:inline-block; margin-top:12px; padding:4px 14px; border-radius:20px; font-size:0.85em; background:var(--bg-card); border:1px solid var(--border); color:var(--text-dim); }
+section { padding:40px 0; }
+section h2 { font-size:1.5em; font-weight:700; margin-bottom:20px; display:flex; align-items:center; gap:10px; }
+section h3 { font-size:1.1em; font-weight:600; margin:20px 0 10px; color:var(--accent); }
+section h4 { font-size:1em; font-weight:600; margin:14px 0 8px; color:var(--cyan); }
+.card { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:24px; margin-bottom:16px; }
+.card-title { font-size:1.05em; font-weight:700; margin-bottom:6px; }
+.card-desc { color:var(--text-dim); font-size:0.92em; }
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
+@media(max-width:768px){ .grid-2,.grid-3{ grid-template-columns:1fr; } }
+pre, code { font-family:'JetBrains Mono','Fira Code', monospace; }
+pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:16px; overflow-x:auto; margin:10px 0; font-size:0.85em; line-height:1.6; }
+pre .kw { color:#d73a49; } pre .fn { color:#6f42c1; } pre .str { color:#032f62; }
+pre .cm { color:#6a737d; } pre .tp { color:#005cc5; } pre .num { color:#005cc5; }
+pre .macro { color:#6f42c1; }
+code { background:var(--code-bg); padding:2px 6px; border-radius:4px; font-size:0.85em; }
+table { width:100%; border-collapse:collapse; margin:12px 0; font-size:0.9em; }
+th,td { padding:8px 12px; text-align:left; border-bottom:1px solid var(--border); }
+th { color:var(--text-dim); font-weight:600; font-size:0.8em; text-transform:uppercase; }
+.diagram { display:flex; flex-direction:column; align-items:center; gap:6px; padding:16px; }
+.d-box { padding:12px 24px; border-radius:8px; font-weight:600; font-size:0.85em; text-align:center; min-width:140px; }
+.d-arrow { color:var(--text-dim); font-size:1.1em; }
+.d-app { background:rgba(74,108,247,0.15); border:1px solid var(--accent); color:var(--accent); }
+.d-pool { background:rgba(124,92,252,0.15); border:1px solid var(--accent2); color:var(--accent2); }
+.d-buf { background:rgba(16,185,129,0.15); border:1px solid var(--green); color:var(--green); }
+.d-data { background:rgba(245,158,11,0.12); border:1px solid var(--orange); color:var(--orange); }
+.feature-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:8px 0; }
+.feature-item { display:flex; align-items:center; gap:8px; padding:6px 10px; background:var(--code-bg); border-radius:6px; font-size:0.82em; }
+.feature-item .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.dot-yes { background:var(--green); } .dot-partial { background:var(--orange); }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Zephyr net_buf 缓冲区系统</h1>
+  <p>轻量级、引用计数的动态缓冲区管理库</p>
+  <span class="badge">net/buf.h — 2776 行 API 定义</span>
+</div>
+
+<div class="container">
+
+<!-- ======================== 1. OVERVIEW ======================== -->
+<section>
+<h2><span class="icon">📋</span> 1. 概述</h2>
+
+<div class="card">
+  <p>net_buf 是 Zephyr 的核心缓冲区管理库，提供 <strong>引用计数、碎片链、内存池分配</strong> 等功能。虽然名字带"net"，但它完全不依赖网络协议栈，是通用的 OS 服务组件。</p>
+  <div class="grid-2" style="margin-top:16px">
+    <div>
+      <h4>设计目标</h4>
+      <div class="feature-item"><span class="dot dot-yes"></span> 零拷贝传递（引用计数）</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> 动态分配和回收</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> 缓冲区碎片链</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> 固定/可变大小数据池</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> 预分配头空间 (reserve)</div>
+    </div>
+    <div>
+      <h4>应用场景</h4>
+      <div class="feature-item"><span class="dot dot-yes"></span> USB 设备栈 (UDC) 数据传输</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> 蓝牙 HCI 数据包</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> 网络协议栈 (TCP/IP)</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> 传感器数据采集</div>
+      <div class="feature-item"><span class="dot dot-yes"></span> 任意生产者-消费者模式</div>
+    </div>
+  </div>
+</div>
+
+<div class="arch">
+  <div class="diagram">
+    <div class="d-box d-app">Application</div>
+    <div class="d-arrow">⬇ net_buf_alloc</div>
+    <div class="d-box d-pool">net_buf_pool (k_lifo free list)</div>
+    <div class="d-arrow">⬇ 分配</div>
+    <div class="d-box d-buf">net_buf (ref count / frags / user_data)</div>
+    <div class="d-arrow">⬇ data 指针</div>
+    <div class="d-box d-data">Data Buffer (uint8_t[])</div>
+  </div>
+</div>
+</section>
+
+
+<!-- ======================== 2. TWO MODELS ======================== -->
+<section>
+<h2><span class="icon">📦</span> 2. 两种缓冲区模型</h2>
+
+<div class="grid-2">
+
+<div class="card">
+  <div class="card-title"><code>net_buf_simple</code> — 轻量栈缓冲</div>
+  <pre><span class="kw">struct</span> <span class="tp">net_buf_simple</span> {
+    <span class="tp">uint8_t</span>  *data;       <span class="cm">// 数据起始指针</span>
+    <span class="tp">uint16_t</span>  len;         <span class="cm">// 数据长度</span>
+    <span class="tp">uint16_t</span>  size;        <span class="cm">// 总容量</span>
+    <span class="tp">uint8_t</span>  *__buf;       <span class="cm">// 存储区起始</span>
+};</pre>
+  <p style="color:var(--text-dim);font-size:0.9em"><strong>特点：</strong>无引用计数、无动态分配、栈上使用。适合一次性、生命周期明确的场景。共 4 个字段，16 字节（32位）或 24 字节（64位）。</p>
+</div>
+
+<div class="card">
+  <div class="card-title"><code>net_buf</code> — 完整引用计数缓冲</div>
+  <pre><span class="kw">struct</span> <span class="tp">net_buf</span> {
+    <span class="tp">sys_snode_t</span>  node;       <span class="cm">// 链表节点</span>
+    <span class="kw">struct</span> <span class="tp">net_buf</span>  *frags;  <span class="cm">// 碎片链表</span>
+    <span class="tp">uint8_t</span>  ref;            <span class="cm">// 引用计数</span>
+    <span class="tp">uint8_t</span>  flags;
+    <span class="tp">uint8_t</span>  pool_id;         <span class="cm">// 所属池 ID</span>
+    <span class="tp">uint8_t</span>  user_data_size;
+    <span class="cm">// ── 与 net_buf_simple ABI 兼容 ──</span>
+    <span class="tp">uint8_t</span>  *data; <span class="tp">uint16_t</span> len;
+    <span class="tp">uint16_t</span> size; <span class="tp">uint8_t</span> *__buf;
+    <span class="cm">// ── 用户数据 ──</span>
+    <span class="tp">uint8_t</span>  user_data[];
+};</pre>
+  <p style="color:var(--text-dim);font-size:0.9em"><strong>特点：</strong>引用计数、碎片链、池管理、用户数据区域。通过 <code>net_buf_pool</code> 动态分配。</p>
+</div>
+
+</div>
+</section>
+
+
+<!-- ======================== 3. POOL ======================== -->
+<section>
+<h2><span class="icon">🏊</span> 3. 缓冲池 (net_buf_pool)</h2>
+
+<div class="grid-2">
+
+<div class="card">
+  <h4>固定数据大小</h4>
+  <pre><span class="macro">NET_BUF_POOL_FIXED_DEFINE</span>(my_pool, <span class="num">4</span>, <span class="num">256</span>, <span class="num">8</span>, NULL);
+<span class="cm">// 参数: 池名, 缓冲区数量, 数据大小, 用户数据大小, 释放回调</span>
+
+<span class="cm">// 展开后分配:</span>
+<span class="cm">//   - 4 个 net_buf 结构体 (含 8 字节 user_data 每)</span>
+<span class="cm">//   - 4 x 256 = 1024 字节数据存储区</span>
+<span class="cm">//   - 1 个 k_lifo 空闲队列</span></pre>
+</div>
+
+<div class="card">
+  <h4>可变数据大小</h4>
+  <pre><span class="macro">NET_BUF_POOL_DEFINE</span>(my_pool, <span class="num">4</span>, <span class="num">256</span>, <span class="num">8</span>, NULL);
+<span class="cm">// 与 FIXED 的区别：数据在堆上动态分配</span>
+<span class="cm">// 每次 alloc 时 malloc 数据区，free 时释放</span>
+<span class="cm">// 适合不同大小缓冲区的场景</span></pre>
+</div>
+
+</div>
+
+<div class="card">
+  <h3>生命周期</h3>
+  <pre><span class="cm">// 1. 定义池（编译期分配内存）</span>
+<span class="macro">NET_BUF_POOL_FIXED_DEFINE</span>(my_pool, <span class="num">10</span>, <span class="num">64</span>, <span class="num">0</span>, NULL);
+
+<span class="cm">// 2. 分配缓冲区</span>
+<span class="kw">struct</span> <span class="tp">net_buf</span> *buf = <span class="fn">net_buf_alloc</span>(&my_pool, K_SECONDS(<span class="num">1</span>));
+<span class="cm">// 如果在中断上下文，只能用 K_NO_WAIT</span>
+
+<span class="cm">// 3. 使用缓冲区</span>
+<span class="fn">net_buf_add_mem</span>(buf, data, len);
+
+<span class="cm">// 4. 增加引用计数（共享所有权）</span>
+<span class="fn">net_buf_ref</span>(buf);
+
+<span class="cm">// 5. 释放缓冲区（引用计数归零时回收）</span>
+<span class="fn">net_buf_unref</span>(buf);</pre>
+</div>
+</section>
+
+
+<!-- ======================== 4. API ======================== -->
+<section>
+<h2><span class="icon">🔧</span> 4. API 速查表</h2>
+
+<div class="grid-2">
+
+<div class="card">
+  <h4>分配与释放</h4>
+  <table>
+    <tr><td><code>net_buf_alloc(&pool, timeout)</code></td><td>从池分配</td></tr>
+    <tr><td><code>net_buf_ref(buf)</code></td><td>引用 +1</td></tr>
+    <tr><td><code>net_buf_unref(buf)</code></td><td>引用 -1，归零时回收</td></tr>
+    <tr><td><code>net_buf_reset(buf)</code></td><td>重置数据指针</td></tr>
+    <tr><td><code>net_buf_slist_put(list, buf)</code></td><td>放入链表</td></tr>
+    <tr><td><code>net_buf_slist_get(list)</code></td><td>从链表取出</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h4>数据写入</h4>
+  <table>
+    <tr><td><code>net_buf_add(buf, len)</code></td><td>尾部预留 len 字节</td></tr>
+    <tr><td><code>net_buf_add_mem(buf, mem, len)</code></td><td>尾部复制数据</td></tr>
+    <tr><td><code>net_buf_add_u8(buf, val)</code></td><td>尾部添加 uint8</td></tr>
+    <tr><td><code>net_buf_add_le16(buf, val)</code></td><td>尾部添加 LE uint16</td></tr>
+    <tr><td><code>net_buf_add_be16(buf, val)</code></td><td>尾部添加 BE uint16</td></tr>
+    <tr><td><code>net_buf_add_le32(buf, val)</code></td><td>尾部添加 LE uint32</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h4>数据读取</h4>
+  <table>
+    <tr><td><code>net_buf_pull(buf, len)</code></td><td>从头部取出 len 字节</td></tr>
+    <tr><td><code>net_buf_pull_u8(buf)</code></td><td>取出 uint8</td></tr>
+    <tr><td><code>net_buf_pull_le16(buf)</code></td><td>取出 LE uint16</td></tr>
+    <tr><td><code>net_buf_remove_mem(buf, len)</code></td><td>移除并返回</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h4>头部预留</h4>
+  <table>
+    <tr><td><code>net_buf_headroom(buf)</code></td><td>头部剩余空间</td></tr>
+    <tr><td><code>net_buf_tailroom(buf)</code></td><td>尾部剩余空间</td></tr>
+    <tr><td><code>net_buf_push(buf, len)</code></td><td>头部预留（反方向）</td></tr>
+    <tr><td><code>net_buf_push_u8(buf, data)</code></td><td>头部插入 uint8</td></tr>
+    <tr><td><code>net_buf_reserve(buf, headroom)</code></td><td>初始化时预留头部</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h4>碎片链</h4>
+  <table>
+    <tr><td><code>net_buf_frag_last(buf)</code></td><td>获取最后一个碎片</td></tr>
+    <tr><td><code>net_buf_frag_add(head, frag)</code></td><td>追加碎片到尾部</td></tr>
+    <tr><td><code>net_buf_frag_ref(buf)</code></td><td>引用整个链</td></tr>
+    <tr><td><code>net_buf_frag_unref(buf)</code></td><td>释放整个链</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h4>查询</h4>
+  <table>
+    <tr><td><code>net_buf_max_len(buf)</code></td><td>缓冲区最大数据长度</td></tr>
+    <tr><td><code>net_buf_leftovers(buf)</code></td><td>剩余未处理数据</td></tr>
+    <tr><td><code>net_buf_simple_is_last(buf)</code></td><td>是否为最后一个buffer</td></tr>
+  </table>
+</div>
+
+</div>
+</section>
+
+
+<!-- ======================== 5. FRAGMENT CHAIN ======================== -->
+<section>
+<h2><span class="icon">⛓️</span> 5. 碎片链 (Fragment Chain)</h2>
+
+<div class="card">
+  <p>碎片链是 net_buf 处理变长数据包的机制。一个 <code>net_buf</code> 的 <code>frags</code> 字段指向链中的下一个，形成单向链表：</p>
+  <pre>
+  buf1 ───frags──→ buf2 ───frags──→ buf3 ───frags──→ NULL
+  ├─ 64 bytes ─┤   ├─ 64 bytes ─┤   ├─ 32 bytes ─┤
+  └─── 共 160 字节数据</pre>
+
+  <p style="margin-top:12px">使用场景：</p>
+  <ul style="margin:8px 0 0 16px;color:var(--text-dim);font-size:0.9em">
+    <li><strong>USB 传输</strong>：UDC 驱动将大包拆为多个 net_buf 碎片</li>
+    <li><strong>网络 TCP</strong>：一个 socket 数据包可能跨多个缓冲区</li>
+    <li><strong>蓝牙 ATT</strong>：长 MTU 用碎片链承载</li>
+  </ul>
+
+  <pre><span class="cm">// 创建碎片链</span>
+<span class="kw">struct</span> <span class="tp">net_buf</span> *head = <span class="fn">net_buf_alloc</span>(&pool, K_NO_WAIT);
+<span class="fn">net_buf_add_mem</span>(head, <span class="str">"header"</span>, <span class="num">6</span>);
+
+<span class="kw">struct</span> <span class="tp">net_buf</span> *frag = <span class="fn">net_buf_alloc</span>(&pool, K_NO_WAIT);
+<span class="fn">net_buf_add_mem</span>(frag, <span class="str">"payload data..."</span>, <span class="num">14</span>);
+
+<span class="fn">net_buf_frag_add</span>(head, frag);  <span class="cm">// 追加到链尾</span>
+
+<span class="cm">// 遍历链</span>
+<span class="kw">struct</span> <span class="tp">net_buf</span> *cur = head;
+<span class="kw">while</span> (cur) {
+    <span class="fn">process</span>(cur->data, cur->len);
+    cur = cur->frags;
+}</pre>
+</div>
+</section>
+
+
+<!-- ======================== 6. USB 中的使用 ======================== -->
+<section>
+<h2><span class="icon">🔌</span> 6. USB 设备栈中的应用</h2>
+
+<div class="card">
+  <p>在 Zephyr USB 设备栈（device_next）中，net_buf 是 UDC 驱动与类驱动之间的数据传输载体：</p>
+  <pre>
+  USB 中断
+    ↓
+  udc_stm32.c: 从 USB FIFO 读取数据 → net_buf 填充
+    ↓
+  usbd_core.c: 事件循环 → usbd_class_request()
+    ↓
+  类驱动: net_buf->data 读取/写入</pre>
+
+  <p style="margin-top:12px"><strong>UDC 驱动分配 net_buf 的方式：</strong></p>
+  <pre><span class="cm">// usbd_ep_buf_alloc() — 类驱动向 UDC 申请传输缓冲区</span>
+<span class="kw">struct</span> <span class="tp">net_buf</span> *buf = <span class="fn">usbd_ep_buf_alloc</span>(c_data, ep, size);
+<span class="fn">net_buf_add_mem</span>(buf, data, len);
+<span class="fn">usbd_ep_enqueue</span>(c_data, buf);   <span class="cm">// 提交传输</span>
+
+<span class="cm">// 传输完成后收到回调</span>
+<span class="kw">static int</span> <span class="fn">my_request_handler</span>(<span class="kw">struct</span> <span class="tp">usbd_class_data</span> *c_data,
+                             <span class="kw">struct</span> <span class="tp">net_buf</span> *buf, <span class="kw">const int</span> err) {
+    <span class="cm">// buf->data, buf->len 包含 USB 接收的数据</span>
+    <span class="fn">process_data</span>(buf->data, buf->len);
+    <span class="fn">net_buf_unref</span>(buf);  <span class="cm">// 必须释放！</span>
+}</pre>
+
+  <p style="margin-top:12px">UDC 驱动使用 <strong>net_buf_pool</strong> 管理缓冲区，通过 <code>udc_buf_pool</code> （定义在 <code>drivers/usb/common/buf/</code>）提供统一的池接口。</p>
+</div>
+</section>
+
+
+<!-- ======================== 7. SAMPLE ======================== -->
+<section>
+<h2><span class="icon">📝</span> 7. 完整示例程序</h2>
+
+<div class="card">
+  <h4>生产者-消费者模式</h4>
+  <pre><span class="cm">/* prj.conf */
+CONFIG_NET_BUF=y
+CONFIG_NET_BUF_POOL_USAGE=y</pre>
+  <pre><span class="cm">/* main.c — net_buf 生产者-消费者示例 */</span>
+<span class="macro">#include</span> <span class="str">&lt;zephyr/kernel.h&gt;</span>
+<span class="macro">#include</span> <span class="str">&lt;zephyr/net_buf.h&gt;</span>
+<span class="macro">#include</span> <span class="str">&lt;zephyr/sys/printk.h&gt;</span>
+
+<span class="cm">/* 定义缓冲区池：10 个缓冲区，每个 128 字节，4 字节用户数据 */</span>
+<span class="macro">NET_BUF_POOL_FIXED_DEFINE</span>(my_pool, <span class="num">10</span>, <span class="num">128</span>, <span class="num">4</span>, NULL);
+
+<span class="cm">/* 数据链表 — 用于线程间传递 */</span>
+<span class="kw">static struct</span> <span class="tp">k_slist</span> data_list;
+
+<span class="cm">/* 生产者线程 */</span>
+<span="kw">void</span> <span class="fn">producer_thread</span>(<span class="kw">void</span> *arg1, <span class="kw">void</span> *arg2, <span class="kw">void</span> *arg3) {
+    <span class="tp">uint32_t</span> counter = <span class="num">0</span>;
+
+    <span class="kw">while</span> (<span class="num">1</span>) {
+        <span class="cm">/* 从池中分配缓冲区 */</span>
+        <span class="kw">struct</span> <span class="tp">net_buf</span> *buf = <span class="fn">net_buf_alloc</span>(&my_pool, K_SECONDS(<span class="num">1</span>));
+        <span class="kw">if</span> (!buf) { <span class="fn">printk</span>(<span class="str">"alloc timeout\n"</span>); <span class="kw">continue</span>; }
+
+        <span class="cm">/* 构造数据包 */</span>
+        <span class="fn">net_buf_add_mem</span>(buf, <span class="str">"Packet #"</span>, <span class="num">8</span>);
+        <span class="fn">net_buf_add_le32</span>(buf, counter++);
+        <span class="fn">net_buf_add</span>(buf, <span class="num">1</span>);  <span class="cm">// 终止符预留</span>
+
+        <span class="cm">/* 写入用户数据（元信息） */</span>
+        *(<span class="tp">uint32_t</span> *)<span class="fn">net_buf_user_data</span>(buf) = counter;
+
+        <span class="cm">/* 放入链表传递 */</span>
+        <span class="fn">net_buf_slist_put</span>(&data_list, buf);
+        <span class="fn">printk</span>(<span class="str">"Produced: len=%u, id=%u\n"</span>,
+               buf->len, counter);
+
+        <span class="fn">k_sleep</span>(K_SECONDS(<span class="num">2</span>));
+    }
+}
+
+<span class="cm">/* 消费者线程 */</span>
+<span="kw">void</span> <span class="fn">consumer_thread</span>(<span class="kw">void</span> *arg1, <span class="kw">void</span> *arg2, <span class="kw">void</span> *arg3) {
+    <span class="kw">while</span> (<span class="num">1</span>) {
+        <span class="cm">/* 从链表获取缓冲区（阻塞） */</span>
+        <span class="kw">struct</span> <span class="tp">net_buf</span> *buf = <span class="fn">net_buf_slist_get</span>(&data_list);
+        <span class="kw">if</span> (!buf) { <span class="fn">k_sleep</span>(K_MSEC(<span class="num">100</span>)); <span class="kw">continue</span>; }
+
+        <span class="cm">/* 读取用户数据 */</span>
+        <span class="tp">uint32_t</span> id = *(<span class="tp">uint32_t</span> *)<span class="fn">net_buf_user_data</span>(buf);
+
+        <span class="cm">/* 处理数据 */</span>
+        <span class="fn">printk</span>(<span class="str">"Consumed: len=%u, id=%u, data="</span>,
+               buf->len, id);
+        <span class="kw">for</span> (<span class="tp">int</span> i = <span class="num">0</span>; i &lt; buf->len; i++) {
+            <span class="fn">printk</span>(<span class="str">"%02x "</span>, buf->data[i]);
+        }
+        <span class="fn">printk</span>(<span class="str">"\n"</span>);
+
+        <span class="cm">/* 释放缓冲区（引用计数归零时自动回池） */</span>
+        <span class="fn">net_buf_unref</span>(buf);
+    }
+}
+
+<span class="macro">K_THREAD_DEFINE</span>(producer_id, <span class="num">1024</span>,
+                producer_thread, NULL, NULL, NULL,
+                <span class="num">5</span>, <span class="num">0</span>, <span class="num">0</span>);
+<span class="macro">K_THREAD_DEFINE</span>(consumer_id, <span class="num">1024</span>,
+                consumer_thread, NULL, NULL, NULL,
+                <span class="num">5</span>, <span class="num">0</span>, <span class="num">0</span>);
+
+<span="kw">int</span> <span class="fn">main</span>(<span class="kw">void</span>) {
+    <span class="fn">k_slist_init</span>(&data_list);
+    <span class="fn">printk</span>(<span class="str">"net_buf producer/consumer example\n"</span>);
+    <span class="kw">return</span> <span class="num">0</span>;
+}</pre>
+</div>
+</section>
+
+
+<!-- ======================== 8. ADVANCED ======================== -->
+<section>
+<h2><span class="icon">⚡</span> 8. 高级用法</h2>
+
+<div class="grid-2">
+
+<div class="card">
+  <h4>引用计数共享</h4>
+  <pre><span class="cm">// 同一块数据被多个消费者共享</span>
+<span class="kw">struct</span> <span class="tp">net_buf</span> *buf = <span class="fn">net_buf_alloc</span>(&pool, K_NO_WAIT);
+<span class="fn">net_buf_add_mem</span>(buf, data, len);
+
+<span class="kw">struct</span> <span class="tp">net_buf</span> *clone = buf;
+<span class="fn">net_buf_ref</span>(clone);  <span class="cm">// ref=2，底层数据不复制</span>
+
+<span class="cm">// 两个指针独立操作 data 偏移，但共享同一存储</span>
+<span class="cm">// 各自调用 net_buf_unref()，最后一个释放时回收</span></pre>
+</div>
+
+<div class="card">
+  <h4>头部预留 (Reserve/ Push)</h4>
+  <pre><span class="cm">// 协议栈分层处理时预留协议头空间</span>
+<span class="kw">struct</span> <span class="tp">net_buf</span> *buf = <span class="fn">net_buf_alloc</span>(&pool, K_NO_WAIT);
+<span class="fn">net_buf_reserve</span>(buf, <span class="num">4</span>);  <span class="cm">// 预留 4 字节头部</span>
+
+<span class="cm">// 下层协议填充 payload</span>
+<span class="fn">net_buf_add_mem</span>(buf, payload, len);
+
+<span class="cm">// 上层协议插入头部</span>
+<span class="fn">net_buf_push_u8</span>(buf, flags);
+<span class="fn">net_buf_push_le16</span>(buf, type);
+<span class="fn">net_buf_push_u8</span>(buf, version);</pre>
+</div>
+
+</div>
+</section>
+
+
+<!-- ======================== 9. CONFIG ======================== -->
+<section>
+<h2><span class="icon">⚙️</span> 9. Kconfig 选项</h2>
+
+<div class="card">
+  <table>
+    <tr><th>配置项</th><th>默认</th><th>说明</th></tr>
+    <tr><td><code>CONFIG_NET_BUF</code></td><td>y</td><td>启用 net_buf 库</td></tr>
+    <tr><td><code>CONFIG_NET_BUF_POOL_USAGE</code></td><td>n</td><td>启用池使用统计 (avail_count/max_used)</td></tr>
+    <tr><td><code>CONFIG_NET_BUF_ALIGNMENT</code></td><td>0</td><td>缓冲区对齐要求 (0=默认指针对齐)</td></tr>
+    <tr><td><code>CONFIG_NET_BUF_LOG_LEVEL</code></td><td>OFF</td><td>日志级别</td></tr>
+    <tr><td><code>CONFIG_NET_BUF_WARN_ALLOC_FAIL</code></td><td>y</td><td>分配失败时告警</td></tr>
+  </table>
+</div>
+</section>
+
+
+<!-- ======================== 10. REFERENCE ======================== -->
+<section>
+<h2><span class="icon">📚</span> 10. 参考</h2>
+
+<div class="grid-3">
+<div class="card">
+  <div class="card-title">核心位置</div>
+  <ul style="font-size:0.85em;color:var(--text-dim);line-height:2;margin:8px 0 0 16px">
+    <li><code>include/zephyr/net_buf.h</code></li>
+    <li><code>subsys/net/lib/buf/</code></li>
+  </ul>
+</div>
+<div class="card">
+  <div class="card-title">适用场景</div>
+  <ul style="font-size:0.85em;color:var(--text-dim);line-height:2;margin:8px 0 0 16px">
+    <li>USB UDC 数据传输</li>
+    <li>蓝牙 HCI 数据包</li>
+    <li>网络协议栈</li>
+    <li>线程间数据传递</li>
+  </ul>
+</div>
+<div class="card">
+  <div class="card-title">性能要点</div>
+  <ul style="font-size:0.85em;color:var(--text-dim);line-height:2;margin:8px 0 0 16px">
+    <li>分配时间 O(1)（LIFO 出队）</li>
+    <li>引用计数零拷贝</li>
+    <li>碎片链避免大块拷贝</li>
+    <li>池预分配无碎片</li>
+  </ul>
+</div>
+</div>
+</section>
+
+<div style="text-align:center;padding:40px 0 60px;color:var(--text-dim);font-size:0.85em">
+  <p>Zephyr net_buf — v4.4.0 | 2776 行 API 定义</p>
+</div>
+
+</div>
+</body>
+</html>
